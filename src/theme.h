@@ -9,12 +9,18 @@
 class Theme : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantMap colors READ colors NOTIFY changed)
+    Q_PROPERTY(QString iconSource READ iconSource NOTIFY changed)
 public:
     Theme() {
         reload();
         qGuiApp->installEventFilter(this);
     }
     QVariantMap colors() const { return m_colors; }
+    QString iconSource() const {
+        return m_colors.value("background").value<QColor>().lightnessF() < 0.5
+            ? "qrc:/resources/icons/lantern-black.png"
+            : "qrc:/resources/icons/lantern-white.png";
+    }
 signals:
     void changed();
 protected:

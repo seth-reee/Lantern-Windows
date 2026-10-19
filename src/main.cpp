@@ -11,10 +11,13 @@
 int main(int argc,char **argv) {
  QGuiApplication app(argc,argv);
  app.setApplicationName("Lantern"); app.setOrganizationName("Lantern"); app.setApplicationVersion(LANTERN_VERSION);
- app.setWindowIcon(QIcon(":/Lantern.png"));
  app.setDesktopFileName("lantern");
  QQuickStyle::setStyle("Basic");
- Theme theme; Scanner scanner; HostFilter hosts; hosts.setSourceModel(&scanner);
+ Theme theme;
+ auto updateIcon=[&app,&theme]() { app.setWindowIcon(QIcon(theme.iconSource().replace("qrc:", ":"))); };
+ QObject::connect(&theme,&Theme::changed,&app,updateIcon);
+ updateIcon();
+ Scanner scanner; HostFilter hosts; hosts.setSourceModel(&scanner);
  QQmlApplicationEngine engine;
  engine.rootContext()->setContextProperty("theme",&theme);
  engine.rootContext()->setContextProperty("scanner",&scanner);

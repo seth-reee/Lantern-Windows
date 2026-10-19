@@ -22,8 +22,15 @@ private slots:
   QGuiApplication::setPalette(palette);
   QCoreApplication::processEvents();
   const auto colors=theme.colors();
+  const auto darkIcon=theme.iconSource();
+  palette.setColor(QPalette::Window,QColor("#ffffff"));
+  QGuiApplication::setPalette(palette);
+  QCoreApplication::processEvents();
+  const auto lightIcon=theme.iconSource();
   QGuiApplication::setPalette(original);
   QCoreApplication::processEvents();
+  QCOMPARE(darkIcon,QString("qrc:/resources/icons/lantern-black.png"));
+  QCOMPARE(lightIcon,QString("qrc:/resources/icons/lantern-white.png"));
   QCOMPARE(colors["background"].value<QColor>(),QColor("#112233"));
   QCOMPARE(colors["foreground"].value<QColor>(),QColor("#eeeeee"));
   QCOMPARE(colors["accent"].value<QColor>(),QColor("#4488cc"));

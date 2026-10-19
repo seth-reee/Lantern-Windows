@@ -63,7 +63,7 @@ ApplicationWindow {
  ColumnLayout {
   anchors.fill: parent; anchors.margins: 20; spacing: 12
   RowLayout {
-   Image { source: "qrc:/Lantern.png"; sourceSize.width: 84; sourceSize.height: 84; Layout.preferredWidth: 42; Layout.preferredHeight: 42; fillMode: Image.PreserveAspectFit }
+   Image { source: theme.iconSource; sourceSize.width: 84; sourceSize.height: 84; Layout.preferredWidth: 42; Layout.preferredHeight: 42; fillMode: Image.PreserveAspectFit }
    ColumnLayout { spacing: 2
     Label { text: "Lantern"; font.pixelSize: 24; font.bold: true }
     Label { text: "Network IP scanner"; opacity: 0.65 }
@@ -164,7 +164,7 @@ ApplicationWindow {
  FileDialog { id: exportDialog; title: "Export scan results"; fileMode: FileDialog.SaveFile; defaultSuffix: "csv"; nameFilters: ["CSV files (*.csv)"]; currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation); onAccepted: scanner.exportCsv(selectedFile) }
  Dialog { id: about; objectName: "aboutDialog"; title: "About Lantern"; anchors.centerIn: parent; modal: true; standardButtons: Dialog.Close; width: 580
   contentItem: ColumnLayout { spacing: 10
-   Image { source: "qrc:/Lantern.png"; sourceSize.width: 72; sourceSize.height: 72; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }
+   Image { source: theme.iconSource; sourceSize.width: 72; sourceSize.height: 72; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }
    Label { text: "Lantern " + Qt.application.version; font.pixelSize: 23; font.bold: true }
    Label { text: "A lightweight network IP scanner for Windows." }
    Label { text: 'Created by seth-reee · <a href="https://github.com/seth-reee">GitHub profile</a> · <a href="https://github.com/seth-reee/Lantern">Source code</a>'; textFormat: Text.RichText; onLinkActivated: link => Qt.openUrlExternally(link); palette.link: theme.colors.accent }

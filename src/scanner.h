@@ -1,7 +1,9 @@
 #pragma once
 #include <QAbstractListModel>
 #include <QSortFilterProxyModel>
-#include <QProcess>
+#include "networkprobe.h"
+#include <atomic>
+#include <memory>
 #include <QSet>
 #include <QUrl>
 #include <QElapsedTimer>
@@ -21,7 +23,7 @@ class Scanner : public QAbstractListModel {
 public:
  static constexpr int MaxTargets = 65536;
  enum Roles { Ip = Qt::UserRole+1, Status, Hostname, Latency, Ports, Detail, Address, Mac };
- explicit Scanner(QObject *parent=nullptr);
+ explicit Scanner(QObject *parent=nullptr, PingFunction ping=pingHost);
  ~Scanner() override;
  int rowCount(const QModelIndex &parent={}) const override { return parent.isValid()?0:m_hosts.size(); }
  QVariant data(const QModelIndex &, int) const override;
@@ -39,10 +41,11 @@ public:
  Q_INVOKABLE void start(const QString &range, bool dns=true, bool ports=true, int timeout=800, int concurrency=32);
  Q_INVOKABLE void stop();
  Q_INVOKABLE bool exportCsv(const QUrl &);
- Q_INVOKABLE bool addToPortalview(const QString &ip, const QString &hostname);
  Q_INVOKABLE void copy(const QString &);
 signals: void changed();
 private:
+ PingFunction m_ping;
+ std::shared_ptr<std::atomic_bool> m_cancelled;
  QElapsedTimer m_clock;
  QTimer m_tick;
  qint64 m_elapsedMs=0;

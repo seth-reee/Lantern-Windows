@@ -3,3 +3,4 @@
 
 /dist/
 *.pkg.tar.zst
+/.qmlls.build.ini

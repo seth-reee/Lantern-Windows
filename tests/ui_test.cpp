@@ -6,17 +6,33 @@
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QDir>
 #include "scanner.h"
 #include "theme.h"
 class UiTest:public QObject {
  Q_OBJECT
 private slots:
+ void systemPaletteChanges() {
+  Theme theme;
+  const auto original=QGuiApplication::palette();
+  QPalette palette=original;
+  palette.setColor(QPalette::Window,QColor("#112233"));
+  palette.setColor(QPalette::WindowText,QColor("#eeeeee"));
+  palette.setColor(QPalette::Accent,QColor("#4488cc"));
+  QGuiApplication::setPalette(palette);
+  QCoreApplication::processEvents();
+  const auto colors=theme.colors();
+  QGuiApplication::setPalette(original);
+  QCoreApplication::processEvents();
+  QCOMPARE(colors["background"].value<QColor>(),QColor("#112233"));
+  QCOMPARE(colors["foreground"].value<QColor>(),QColor("#eeeeee"));
+  QCOMPARE(colors["accent"].value<QColor>(),QColor("#4488cc"));
+  QCOMPARE(theme.colors()["background"].value<QColor>(),original.window().color());
+ }
  void populatedWindow() {
   QQuickStyle::setStyle("Basic");
-  QTemporaryDir dir; QFile ping(dir.filePath("ping")); QVERIFY(ping.open(QIODevice::WriteOnly)); ping.write("#!/bin/sh\necho 'time=0.123 ms'\nexit 0\n"); ping.close(); ping.setPermissions(QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);
-  const auto path=qgetenv("PATH"); qputenv("PATH",dir.path().toUtf8());
-  Scanner scanner; scanner.start("127.0.0.1-127.0.0.3",false,false,200,1);
-  QTRY_VERIFY_WITH_TIMEOUT(!scanner.running(),3000); qputenv("PATH",path); QCOMPARE(scanner.alive(),3);
+  Scanner scanner(nullptr, [](const QString &, int) { return PingResult{true,"0.123 ms",{}}; }); scanner.start("127.0.0.1-127.0.0.3",false,false,200,1);
+  QTRY_VERIFY_WITH_TIMEOUT(!scanner.running(),3000); QCOMPARE(scanner.alive(),3);
   Theme theme; HostFilter hosts; hosts.setSourceModel(&scanner);
   QQmlApplicationEngine engine;
   QStringList warnings;
@@ -51,19 +67,16 @@ private slots:
   QTest::qWait(200);
   menu->setProperty("currentIndex",-1);
   QTest::keyClick(copy->window(),Qt::Key_Down);
-  QTest::keyClick(copy->window(),Qt::Key_Down);
   QTRY_VERIFY(copy->property("highlighted").toBool());
   auto *label=copy->property("contentItem").value<QObject*>(); QVERIFY(label);
   QCOMPARE(label->property("color").value<QColor>(),QColor(theme.colors()["foreground"].toString()));
   auto *background=copy->property("background").value<QObject*>(); QVERIFY(background);
   QCOMPARE(background->property("color").value<QColor>(),QColor(theme.colors()["selection"].toString()));
-  copy->window()->grabWindow().save("/tmp/lantern-menu-preview.png");
+  copy->window()->grabWindow().save(QDir::temp().filePath("lantern-menu-preview.png"));
   QVERIFY(QMetaObject::invokeMethod(menu,"close"));
   hosts.filter("nothing-matches",""); QTRY_COMPARE(results->property("count").toInt(),0);
   hosts.filter("127.0.0.2","Live"); QTRY_COMPARE(results->property("count").toInt(),1);
-  qputenv("PATH",dir.path().toUtf8());
   scanner.start("127.42.0.0/16",false,false,200,1);
-  qputenv("PATH",path);
   QVERIFY(scanner.running()); QCOMPARE(scanner.total(),65534);
   scanner.stop(); hosts.filter("","");
   QTRY_COMPARE(results->property("count").toInt(),65534);

@@ -1,0 +1,62 @@
+name: Windows build
+on:
+  push:
+    branches: [main, windows-port]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel 4
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Deploy
+        shell: pwsh
+        run: |
+          cmake --install build --prefix "$PWD/dist/Lantern-Windows"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          windeployqt --release --qmldir "$PWD/qml" --compiler-runtime "$PWD/dist/Lantern-Windows/lantern.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $licensePath = Join-Path $env:QT_ROOT_DIR 'Licenses'
+          if (!(Test-Path $licensePath)) { $licensePath = Join-Path (Split-Path $env:QT_ROOT_DIR) 'Licenses' }
+          if (!(Test-Path $licensePath)) { throw 'Qt license folder missing' }
+          Copy-Item $licensePath dist/Lantern-Windows/qt-licenses -Recurse
+          Copy-Item README.md dist/Lantern-Windows/README.md
+      - name: Smoke test deployed application without Qt on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot/system32;$env:SystemRoot"
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QML_IMPORT_PATH -ErrorAction SilentlyContinue
+          $env:QT_QPA_PLATFORM = 'windows'
+          $env:QT_QUICK_BACKEND = 'software'
+          $app = Start-Process -FilePath "$PWD/dist/Lantern-Windows/lantern.exe" -ArgumentList '--smoke-test' -PassThru
+          if (!$app.WaitForExit(30000)) { $app.Kill(); throw 'Deployed application timed out' }
+          if ($app.ExitCode -ne 0) { throw "Deployed application exited $($app.ExitCode)" }
+      - name: Create ZIP and checksum
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/Lantern-Windows -DestinationPath dist/Lantern-Windows-x64.zip
+          (Get-FileHash dist/Lantern-Windows-x64.zip -Algorithm SHA256).Hash + '  Lantern-Windows-x64.zip' | Set-Content dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lantern-Windows-x64
+          path: |
+            dist/Lantern-Windows-x64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error

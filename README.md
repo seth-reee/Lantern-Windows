@@ -1,97 +1,96 @@
-# <img src="Lantern.png" width="48" height="48" alt=""> Lantern
+# <img src="Lantern.png" width="48" height="48" alt=""> Lantern for Windows
 
-A lightweight IP scanner for [Omarchy](https://omarchy.org/), built with C++ and Qt Quick.
+A lightweight IPv4 network scanner built with C++20 and Qt Quick, ported from
+[Lantern for Linux](https://github.com/seth-reee/Lantern).
+
+## Windows preview
+
+Target: Windows 11 x64. The Windows workflow builds with MSVC 2022 and Qt 6.8.3,
+runs tests including native ICMP loopback, and packages a portable ZIP with Qt
+libraries, plugins, and QML dependencies.
+
+To get a test build, open [Actions](https://github.com/seth-reee/Lantern-Windows/actions/workflows/windows.yml),
+select a successful Windows build, and download the **Lantern-Windows-x64** artifact
+(GitHub sign-in required). Extract the artifact, then extract its
+`Lantern-Windows-x64.zip` and run `Lantern-Windows/lantern.exe`.
+Keep the executable with the accompanying folders and DLLs. No Qt installation
+or application installer is needed. Preview builds are unsigned.
+
+Real LAN discovery, Windows theme changes, high DPI, and hardware rendering need
+manual testing on Windows; CI alone does not establish these behaviors.
 
 ## Features
 
-- Scan an IPv4 address, inclusive range, or CIDR subnet.
-- Discover live hosts with ICMP ping and optional common TCP port checks.
-- Resolve hostnames using reverse DNS where available.
-- Show elapsed scan time and available local-network MAC addresses.
-- Show ping response times and open TCP ports as results arrive.
-- Hide dead IPs, search results, and filter by host status.
-- Sort columns, copy host details, and export all results to CSV.
-- Stop a scan while preserving completed results.
-- Follow the active Omarchy theme, including live changes.
+- Scan an IPv4 address, inclusive range, or CIDR (up to 65,536 targets).
+- Native Windows ICMP discovery without parsing localized ping output.
+- Optional checks of 23 common TCP ports and reverse DNS lookup.
+- Available local-network MAC addresses through the Windows neighbor table.
+- Search, status filters, sorting, clipboard copy, and atomic CSV export.
+- Stop/restart scans while retaining completed results.
+- Follow system application colors, light/dark appearance, and accent colors
+  exposed by Qt; no Omarchy configuration or Portalview integration.
 
-## Install
+Enter an address (`192.168.1.1`), inclusive range
+(`192.168.1.1-192.168.1.254`), or CIDR (`192.168.1.0/24`). CIDR excludes the
+network/broadcast addresses except for /31 and /32. Local /24 selects the first
+active non-loopback IPv4 adapter; check the range when using VPNs or virtual
+adapters. Host concurrency is 1–64 (default 32); worker execution is additionally
+bounded by Qt's thread pool. Timeout is 200–5,000 ms per probe.
 
-Build from source using the instructions below. The repository includes an automated
-release workflow for x86_64 and ARM64 Arch packages. Once a release is available,
-download the package matching your architecture from
-[Releases](https://github.com/seth-reee/Lantern/releases) and install it with:
+**Live** means ICMP responded or a tested TCP port opened. **No reply** can mean a
+firewall blocks discovery. **Error** means an operational probe error occurred
+without TCP establishing liveness. **Cancelled** rows were unfinished when stopped.
+MAC addresses are best effort on the local network; routed devices usually have
+no available MAC. Reverse DNS names may be absent.
 
-```bash
-sudo pacman -U ./lantern-VERSION-1-x86_64.pkg.tar.zst
+Common ports: 21, 22, 23, 25, 53, 80, 110, 139, 143, 443, 445, 587, 631, 993, 995,
+1433, 3306, 3389, 5432, 5900, 8000, 8080, 8443. These are TCP connection checks,
+not service identification or UDP scans.
+
+Right-click a row to copy its IP/details; double-click to copy its IP. Ctrl+F
+focuses search; Escape stops scanning. Export includes every row regardless of
+view filters. The display keeps Lantern's custom layout while using system colors.
+
+## Build on Windows
+
+Install Visual Studio 2022 Build Tools with Desktop development with C++ and a
+Windows SDK, CMake 3.24+, Ninja, and the matching Qt 6.8+ MSVC 2022 x64 kit
+(including Qt Quick, Quick Controls, Network, Concurrent, and Test).
+From an x64 Native Tools command prompt with Qt's `bin` directory on PATH:
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+cmake --build build --parallel 4
+ctest --test-dir build --output-on-failure
+cmake --install build --prefix dist/Lantern-Windows
+windeployqt --release --qmldir qml --compiler-runtime dist/Lantern-Windows/lantern.exe
 ```
 
-Use the `aarch64` package on ARM64. Install `qt6-wayland` for native Wayland support.
-Launch **Lantern** from the application menu or run `lantern`.
+The CI workflow also bundles Qt license materials and tests the deployed app
+with Qt paths removed from the environment. See the workflow for distribution
+steps. Use a matching compiler/Qt architecture; do not mix MinGW and MSVC kits.
 
-## Use
+## Linux development checks
 
-Enter one address (`192.168.1.1`), an inclusive range (`192.168.1.1-192.168.1.254`), or CIDR (`192.168.1.0/24`). CIDR excludes network/broadcast addresses except /31 and /32. Maximum 65,536 targets, including full `/16` subnets (65,534 usable addresses). Larger scans use the same bounded host concurrency; elapsed time depends on timeouts and the number of responding hosts. Local /24 uses the first active non-loopback IPv4 interface, limited to /24 for a manageable default; choose the intended range on machines with multiple interfaces or VPNs.
-
-Scan sends one ICMP echo per address using iputils. Optional common-port detection tries TCP connections to 23 ports: 21, 22, 23, 25, 53, 80, 110, 139, 143, 443, 445, 587, 631, 993, 995, 1433, 3306, 3389, 5432, 5900, 8000, 8080, 8443. It checks whether connections open; it does not fingerprint services or scan UDP. The timeout applies to each probe; host concurrency is configurable from 1–64 (default 32).
-
-- **Live:** a ping reply or at least one open TCP port.
-- **No reply:** no ping response and no open tested ports; a host might still be online behind a firewall.
-- **Error:** ping could not execute or reported an operational error, and TCP did not establish liveness. Select the host to see the error.
-- **Cancelled:** not completed when stopped. Partial results remain available.
-
-Reverse DNS is attempted for live hosts with a two-second deadline. A blank name means no reverse DNS name was obtained; not every device publishes one. Ping latency is shown only when ICMP responds. MAC addresses are read from completed entries in the Linux ARP table after probing, with local interface addresses also supported. They are available only on the local network; routed hosts and unresolved neighbors remain blank. MAC vendor lookup, NetBIOS/mDNS names, service fingerprinting, and continuous monitoring are not implemented.
-
-Enable **Hide dead IPs** to hide hosts with **No reply** status while retaining them in scan totals and CSV exports. Filter by IP/name/MAC/port/status, click column headings to sort, right-click to copy a host, or double-click to copy its IP. Right-click a host and choose **Add to Portalview** to open its RDP connection editor with the IP and hostname filled in. Enter the username and save in Portalview. An existing connection to that IP on port 3389 opens for editing instead of creating a duplicate. This requires an updated Portalview with `--add-host` support on your PATH; no connection file is edited by Lantern.
-
-Ctrl+F focuses search; Escape stops a running scan. CSV export includes **all** rows, including cancelled/error rows, regardless of view filters, with proper quoting and atomic writes.
-
-## Build
-
-Dependencies: `base-devel`, `cmake`, `ninja`, `qt6-base`, `qt6-declarative`, and
-`iputils`. Requires Qt 6.8+, CMake 3.24+, and a C++20 compiler.
+The original Linux backend remains available for development. Install Qt 6.8+
+Base/Declarative, CMake, Ninja, a C++20 compiler, and iputils:
 
 ```bash
 cmake -S . -B build -G Ninja
-cmake --build build
+cmake --build build --parallel 4
 ctest --test-dir build --output-on-failure
-./build/lantern
 ```
 
-For a user installation:
+Tests use injected structured probe results rather than POSIX fake executables;
+Windows CI additionally exercises the native ICMP backend. An offscreen startup
+check and populated UI/system-palette checks are included.
 
-```bash
-cmake --install build --prefix "$HOME/.local"
-```
+## Project and license
 
-To build the Arch package from a published release, run `makepkg -s` in
-`packaging/`. The recipe downloads and verifies the pinned source archive.
+Forked from upstream commit `680b1642c926b646572d8d311d4fb4b527a76f29`.
+See [Windows port notes](WINDOWS-PORT.md) for architecture and remaining manual checks.
+The inherited Arch release workflow is disabled in this repository.
 
-Theme colors load from `$XDG_STATE_HOME/omarchy/current/theme/colors.toml`
-(default `~/.local/state`) and refresh within two seconds. A fallback palette
-supports other desktops.
-
-Tests cover range validation, scan lifecycle, cancellation, filtering, CSV export,
-error handling, and populated Qt Quick results. A loopback TCP integration test is
-skipped if the environment blocks local sockets. An offscreen startup check is
-also included. These checks do not establish real LAN or ARM desktop behavior.
-
-## License
-
-Lantern is made by [seth-reee](https://github.com/seth-reee) and is available under
-the [MIT License](LICENSE).
-
-## Automated releases
-
-Every push to `master` prepares the next patch version, builds native x86_64 and
-ARM64 Arch packages, and publishes a GitHub release after both architecture jobs
-pass. The workflow updates the version and pinned source checksum, tags the tested
-commit, and verifies uploaded asset checksums before publishing. An explicitly
-increased, untagged version is respected.
-
-Pull requests build development packages without publishing. Manual runs on
-`master` also release; matching version tags build and publish that version.
-Published releases are verified on retries and never replaced.
-
-CI runs the scanner and UI tests, checks package metadata and ELF architecture,
-and runs the packaged executable offscreen. CI does not establish real ARM
-desktop, Wayland, hardware GPU, or live LAN behavior.
+Copyright © 2026 [seth-reee](https://github.com/seth-reee).
+Application source is available under the [MIT License](LICENSE).
+Qt libraries have their own licenses; see the notices distributed with builds.

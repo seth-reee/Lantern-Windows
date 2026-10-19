@@ -5,6 +5,7 @@
 #include <QQuickStyle>
 #include <QTimer>
 #include <QQuickWindow>
+#include <QDir>
 #include "scanner.h"
 #include "theme.h"
 int main(int argc,char **argv) {
@@ -21,7 +22,7 @@ int main(int argc,char **argv) {
  QObject::connect(&engine,&QQmlApplicationEngine::objectCreationFailed,&app,[] { QCoreApplication::exit(1); },Qt::QueuedConnection);
  engine.loadFromModule("Lantern","Main");
  if(app.arguments().contains("--smoke-test")) QTimer::singleShot(700,&app,[&]() {
-  if(auto *window=qobject_cast<QQuickWindow*>(engine.rootObjects().value(0))) window->grabWindow().save("/tmp/lantern-preview.png");
+  if(auto *window=qobject_cast<QQuickWindow*>(engine.rootObjects().value(0))) window->grabWindow().save(QDir::temp().filePath("lantern-preview.png"));
   app.quit();
  });
  return app.exec();

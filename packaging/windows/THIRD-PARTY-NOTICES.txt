@@ -1,0 +1,16 @@
+Lantern for Windows
+Copyright (c) 2026 seth-reee. Application source: MIT License (see LICENSE).
+
+This distribution uses dynamically linked Qt 6 libraries and plugins.
+Qt is copyright The Qt Company Ltd. and other contributors.
+The open-source Qt modules used here are available under LGPL version 3,
+with additional third-party notices/licenses in the accompanying qt-licenses
+folder. Qt source code for the version used to build this distribution is
+available at https://download.qt.io/archive/qt/6.8/6.8.3/single/ .
+Qt licensing information: https://www.qt.io/licensing/open-source-lgpl-obligations
+The LGPL permits replacing these dynamically linked Qt libraries with compatible
+modified versions. This application does not prohibit reverse engineering for
+debugging modifications to the LGPL libraries.
+
+Microsoft runtime components, when included by the Qt deployment tool, remain
+subject to Microsoft's applicable redistributable license terms.

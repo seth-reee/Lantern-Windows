@@ -17,7 +17,7 @@ ApplicationWindow {
  palette.windowText: theme.colors.foreground
  palette.buttonText: theme.colors.foreground
  palette.highlight: theme.colors.accent
- palette.highlightedText: theme.colors.background
+ palette.highlightedText: theme.colors.highlighted_text
  palette.placeholderText: theme.colors.muted
  property string licenseText: "MIT License\n\nCopyright (c) 2026 seth-reee\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
  property string selectedIp: ""
@@ -149,11 +149,6 @@ ApplicationWindow {
        id: rowMenu; objectName: "hostContextMenu"
        implicitWidth: 220; padding: 5
        background: Rectangle { radius: 6; color: theme.colors.lighter_background; border.color: theme.colors.muted }
-       HostMenuItem { objectName: "addToPortalviewAction"; text: "Add to Portalview"; onTriggered: scanner.addToPortalview(row.ip, row.hostname) }
-       MenuSeparator {
-        padding: 4; implicitHeight: 9
-        contentItem: Rectangle { implicitHeight: 1; color: theme.colors.muted }
-       }
        HostMenuItem { objectName: "copyIpAction"; text: "Copy IP address"; onTriggered: scanner.copy(row.ip) }
        HostMenuItem { text: "Copy host details"; onTriggered: scanner.copy(root.selectedInfo) }
       }
@@ -171,7 +166,7 @@ ApplicationWindow {
   contentItem: ColumnLayout { spacing: 10
    Image { source: "qrc:/Lantern.png"; sourceSize.width: 72; sourceSize.height: 72; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }
    Label { text: "Lantern " + Qt.application.version; font.pixelSize: 23; font.bold: true }
-   Label { text: "A lightweight network IP scanner for Omarchy." }
+   Label { text: "A lightweight network IP scanner for Windows." }
    Label { text: 'Created by seth-reee · <a href="https://github.com/seth-reee">GitHub profile</a> · <a href="https://github.com/seth-reee/Lantern">Source code</a>'; textFormat: Text.RichText; onLinkActivated: link => Qt.openUrlExternally(link); palette.link: theme.colors.accent }
    Label { text: "MIT License · Copyright © 2026 seth-reee" }
    ScrollView { Layout.fillWidth: true; Layout.preferredHeight: 190; clip: true

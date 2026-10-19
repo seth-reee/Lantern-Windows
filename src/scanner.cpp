@@ -12,8 +12,10 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QFile>
+#include <QFutureWatcher>
+#include <QtConcurrentRun>
 
-Scanner::Scanner(QObject *p):QAbstractListModel(p) { m_tick.setInterval(100); connect(&m_tick,&QTimer::timeout,this,&Scanner::changed); }
+Scanner::Scanner(QObject *p, PingFunction ping):QAbstractListModel(p),m_ping(std::move(ping)) { m_tick.setInterval(100); connect(&m_tick,&QTimer::timeout,this,&Scanner::changed); }
 Scanner::~Scanner() { stop(); }
 QHash<int,QByteArray> Scanner::roleNames() const { return {{Ip,"ip"},{Status,"status"},{Hostname,"hostname"},{Latency,"latency"},{Ports,"ports"},{Detail,"detail"},{Address,"address"},{Mac,"mac"}}; }
 QVariant Scanner::data(const QModelIndex &i,int role) const {
@@ -58,7 +60,7 @@ void Scanner::start(const QString &range,bool dns,bool ports,int timeout,int con
  if(m_running) return;
  QString error; auto addresses=parseRange(range,error);
  if(!error.isEmpty()) { m_message=error; emit changed(); return; }
- if(QStandardPaths::findExecutable("ping").isEmpty()) { m_message="Install iputils: the ping executable is required."; emit changed(); return; }
+ m_cancelled=std::make_shared<std::atomic_bool>(false);
  beginResetModel(); m_hosts.clear(); m_hosts.reserve(addresses.size()); for(auto a:addresses) { Host h; h.address=a; h.ip=QHostAddress(a).toString(); m_hosts.append(h); } endResetModel();
  m_dns=dns; m_ports=ports; m_timeout=qBound(200,timeout,5000); m_limit=qBound(1,concurrency,64);
  m_next=m_completed=m_alive=m_silent=m_active=0; m_clock.start(); m_elapsedMs=0; m_running=true; m_tick.start(); m_message="Scanning…"; emit changed(); pump();
@@ -87,19 +89,20 @@ void Scanner::probe(int row) {
    connect(timer,&QTimer::timeout,job,[lookup,done]() { QHostInfo::abortHostLookup(lookup); done(); }); timer->start(2000);
   } else done();
  };
- auto *process=new QProcess(job); auto env=QProcessEnvironment::systemEnvironment(); env.insert("LC_ALL","C"); process->setProcessEnvironment(env);
- auto *watchdog=new QTimer(process); watchdog->setSingleShot(true);
- connect(watchdog,&QTimer::timeout,process,[process]() { process->kill(); });
- connect(process,&QProcess::errorOccurred,job,[this,row,process,complete](QProcess::ProcessError e) {
-  if(e==QProcess::FailedToStart) { m_hosts[row].detail=process->errorString(); complete(); }
- });
- connect(process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),job,[this,row,process,watchdog,state,complete](int code,QProcess::ExitStatus status) {
-  watchdog->stop(); QString out=QString::fromUtf8(process->readAllStandardOutput()); QString err=QString::fromUtf8(process->readAllStandardError()).trimmed();
-  if(code==0 && status==QProcess::NormalExit) { state->live=true; auto m=QRegularExpression("time([=<])([0-9.]+)").match(out); if(m.hasMatch()) m_hosts[row].latency=(m.captured(1)=="<"?"<":"")+m.captured(2)+" ms"; }
-  else if(code!=1) m_hosts[row].detail=err.isEmpty()?"Ping failed or exceeded its deadline":err;
+ // Workers own their arguments and resources. Destroying the job disconnects the
+ // watcher; cancelled or superseded scans can never update model rows.
+ auto *watcher=new QFutureWatcher<PingResult>(job);
+ connect(watcher,&QFutureWatcher<PingResult>::finished,job,[this,row,watcher,state,complete]() {
+  const auto result=watcher->result();
+  state->live=state->live || result.live;
+  m_hosts[row].latency=result.latency;
+  m_hosts[row].detail=result.error;
   complete();
  });
- process->start(QStandardPaths::findExecutable("ping"),{"-n","-c","1","-W",QString::number(m_timeout/1000.0,'f',3),host.ip}); watchdog->start(m_timeout+500);
+ const auto cancelled=m_cancelled;
+ watcher->setFuture(QtConcurrent::run([ping=m_ping,ip=host.ip,timeout=m_timeout,cancelled]() {
+  return cancelled->load() ? PingResult{} : ping(ip,timeout);
+ }));
  if(m_ports) {
   const QList<int> ports={21,22,23,25,53,80,110,139,143,443,445,587,631,993,995,1433,3306,3389,5432,5900,8000,8080,8443};
   state->pending+=ports.size();
@@ -115,12 +118,7 @@ void Scanner::probe(int row) {
 }
 void Scanner::finish(int row) {
  auto &host=m_hosts[row];
- QFile arp("/proc/net/arp");
- if(arp.open(QIODevice::ReadOnly)) host.mac=macFromArp(QString::fromUtf8(arp.readAll()),host.ip);
- for(const auto &iface:QNetworkInterface::allInterfaces()) {
-  if(iface.flags() & QNetworkInterface::IsLoopBack) continue;
-  for(const auto &entry:iface.addressEntries()) if(entry.ip().toString()==host.ip) host.mac=iface.hardwareAddress().toUpper();
- }
+ host.mac=neighborMac(host.ip);
  --m_active; ++m_completed;
  if(m_hosts[row].status=="Live") ++m_alive; else if(!m_hosts[row].detail.isEmpty()) m_hosts[row].status="Error"; else ++m_silent;
  update(row); emit changed(); pump();
@@ -128,11 +126,11 @@ void Scanner::finish(int row) {
 void Scanner::stop() {
  if(!m_running) return;
  m_elapsedMs=m_clock.elapsed(); m_tick.stop(); m_running=false;
+ m_cancelled->store(true);
  for(auto *job:std::as_const(m_jobs)) {
   // Disconnect callbacks before killing probes; preserve completed results.
   for(auto *child:job->findChildren<QObject*>()) child->disconnect();
   job->disconnect();
-  for(auto *process:job->findChildren<QProcess*>()) { process->kill(); process->waitForFinished(100); }
   delete job;
  }
  m_jobs.clear(); m_active=0;
@@ -163,19 +161,3 @@ bool HostFilter::filterAcceptsRow(int row,const QModelIndex &parent) const {
 }
 
 void Scanner::copy(const QString &text) { QGuiApplication::clipboard()->setText(text); }
-
-bool Scanner::addToPortalview(const QString &ip,const QString &hostname) {
- QHostAddress address;
- if(!address.setAddress(ip) || address.protocol()!=QAbstractSocket::IPv4Protocol) {
-  m_message="Select a valid IPv4 host to add to Portalview."; emit changed(); return false;
- }
- const QString executable=QStandardPaths::findExecutable("portalview");
- if(executable.isEmpty()) { m_message="Install Portalview to add an RDP connection."; emit changed(); return false; }
- const QString name=hostname.trimmed().isEmpty()?ip:hostname.trimmed();
- if(name.contains('\n') || name.contains('\r') || name.contains(QChar(0))) {
-  m_message="The host name must contain a single line."; emit changed(); return false;
- }
- const bool opened=QProcess::startDetached(executable,{"--add-host",ip,"--name",name});
- m_message=opened?"Opening Portalview — enter a username and save the connection.":"Could not start Portalview.";
- emit changed(); return opened;
-}

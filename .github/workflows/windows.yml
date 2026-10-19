@@ -1,39 +1,48 @@
 name: Windows build
 on:
   push:
-    branches: [main, windows-port]
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  release-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check release publication and retry behavior without publishing
+        run: python3 tests/release_test.py
   windows:
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
           arch: win64_msvc2022_64
           cache: true
       - uses: ilammy/msvc-dev-cmd@v1
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $match = Select-String -Path CMakeLists.txt -Pattern 'project\(Lantern VERSION (\d+\.\d+\.\d+)'
+          if (!$match) { throw 'Missing project version' }
+          $version = $match.Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Release tag must match project version v$version"
+          }
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel 4
       - name: Test
         run: ctest --test-dir build --output-on-failure
-      - name: Deploy
+      - name: Deploy Qt and app-local MSVC runtime; verify DLL dependencies
         shell: pwsh
-        run: |
-          cmake --install build --prefix "$PWD/dist/Lantern-Windows"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          windeployqt --release --qmldir "$PWD/qml" --compiler-runtime "$PWD/dist/Lantern-Windows/lantern.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python packaging/windows/collect-qt-notices.py dist/Lantern-Windows/qt-licenses
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item README.md dist/Lantern-Windows/README.md
+        run: ./packaging/windows/deploy.ps1
       - name: Smoke test deployed application without Qt on PATH
         shell: pwsh
         run: |
@@ -51,10 +60,33 @@ jobs:
         run: |
           Compress-Archive -Path dist/Lantern-Windows -DestinationPath dist/Lantern-Windows-x64.zip
           (Get-FileHash dist/Lantern-Windows-x64.zip -Algorithm SHA256).Hash + '  Lantern-Windows-x64.zip' | Set-Content dist/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: Lantern-Windows-x64
           path: |
             dist/Lantern-Windows-x64.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
+
+  release:
+    name: Publish tested version
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, release-checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: Lantern-Windows-x64
+          path: release-assets
+      - name: Verify and publish ZIP and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash packaging/windows/publish-release.sh "$RELEASE_TAG" "$PWD/release-assets"

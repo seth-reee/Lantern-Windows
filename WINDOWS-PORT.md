@@ -24,13 +24,21 @@ Target: Windows 11 x64, MSVC 2022, Qt 6.8.3, C++20, CMake/Ninja.
 - Portable scanner fixtures, cancellation/restart regression coverage, native
   Windows loopback test, CSV/Unicode-path, populated UI, and palette-change checks.
 - Windows CI builds/tests, deploys Qt/QML/compiler dependencies, checks the packaged
-  executable with development paths removed, and uploads a ZIP and SHA-256 checksum.
+  executable with development paths removed, verifies app-local Qt/MSVC DLL imports,
+  and uploads a ZIP and SHA-256 checksum. Microsoft C++ runtime DLLs are bundled
+  directly, without requiring a separate runtime installer.
 - Separate repository with upstream history. Original Linux Lantern is unchanged;
-  inherited Arch publishing automation is disabled.
+  inherited Arch packaging and publishing automation have been removed.
+
+## Reported VM validation
+
+On 2026-10-19 the user confirmed that the packaged application launched and
+scanned successfully in a Windows test VM. The VM OS version, Qt installation
+state, and detailed DNS/MAC/port results were not specified.
 
 ## Remaining manual acceptance checks
 
-- Download a successful CI artifact and launch on Windows 11 without Qt installed.
+- Confirm launch on a Windows 11 machine without Qt installed.
 - Scan a known live LAN host, an ICMP-blocked TCP-only host, and a silent address.
 - Check DNS and available MAC values against the local network's actual devices.
   Neighbor lookup is best effort and enumerates the table per completed host;
@@ -45,7 +53,8 @@ Target: Windows 11 x64, MSVC 2022, Qt 6.8.3, C++20, CMake/Ninja.
   first active adapter is still used; explicit adapter selection is future work.
 
 The preview is unsigned and portable. Installer/signing and ARM64 are follow-up
-work. No automatic GitHub release publication is enabled.
+work. Version tags matching the CMake project version publish tested ZIP/checksum
+assets as GitHub Releases; ordinary branch pushes produce development artifacts.
 
 ## Platform references
 

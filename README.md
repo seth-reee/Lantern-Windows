@@ -9,15 +9,18 @@ Target: Windows 11 x64. The Windows workflow builds with MSVC 2022 and Qt 6.8.3,
 runs tests including native ICMP loopback, and packages a portable ZIP with Qt
 libraries, plugins, and QML dependencies.
 
-To get a test build, open [Actions](https://github.com/seth-reee/Lantern-Windows/actions/workflows/windows.yml),
+Published versions are available on [Releases](https://github.com/seth-reee/Lantern-Windows/releases)
+once a version tag is published. For development test builds, open [Actions](https://github.com/seth-reee/Lantern-Windows/actions/workflows/windows.yml),
 select a successful Windows build, and download the **Lantern-Windows-x64** artifact
 (GitHub sign-in required). Extract the artifact, then extract its
 `Lantern-Windows-x64.zip` and run `Lantern-Windows/lantern.exe`.
 Keep the executable with the accompanying folders and DLLs. No Qt installation
-or application installer is needed. Preview builds are unsigned.
+or application installer is needed. The ZIP includes the Microsoft C++ runtime
+DLLs beside the executable; Windows supplies standard OS DLLs. Preview builds are unsigned.
 
-Real LAN discovery, Windows theme changes, high DPI, and hardware rendering need
-manual testing on Windows; CI alone does not establish these behaviors.
+Launch and scanning were confirmed by the user in a Windows test VM on
+2026-10-19. Theme changes, high DPI, hardware rendering, and detailed network
+results still need manual checking.
 
 ## Features
 
@@ -62,8 +65,7 @@ From an x64 Native Tools command prompt with Qt's `bin` directory on PATH:
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
 cmake --build build --parallel 4
 ctest --test-dir build --output-on-failure
-cmake --install build --prefix dist/Lantern-Windows
-windeployqt --release --qmldir qml --compiler-runtime dist/Lantern-Windows/lantern.exe
+./packaging/windows/deploy.ps1
 ```
 
 The CI workflow also bundles Qt license materials and tests the deployed app
@@ -85,11 +87,25 @@ Tests use injected structured probe results rather than POSIX fake executables;
 Windows CI additionally exercises the native ICMP backend. An offscreen startup
 check and populated UI/system-palette checks are included.
 
+## Releases
+
+Pushes to `main` build/test/package development artifacts. Pushing a version tag
+such as `v0.1.0` builds and publishes a GitHub Release with the portable Windows ZIP
+and `SHA256SUMS.txt`, after all tests and the packaged startup check pass.
+The tag must match `project(... VERSION ...)` in CMakeLists.txt. That version also
+sets the EXE's Windows version metadata. Release uploads are staged as a draft;
+published assets are verified on retries and are never overwritten.
+
+To prepare a later release, update the CMake project version, push the reviewed
+commit, then create and push the matching version tag. Creating a tag is the
+publication step. No release is published by ordinary branch pushes or manual
+build runs.
+
 ## Project and license
 
 Forked from upstream commit `680b1642c926b646572d8d311d4fb4b527a76f29`.
 See [Windows port notes](WINDOWS-PORT.md) for architecture and remaining manual checks.
-The inherited Arch release workflow is disabled in this repository.
+Inherited Arch packaging and release scripts have been removed.
 
 Copyright © 2026 [seth-reee](https://github.com/seth-reee).
 Application source is available under the [MIT License](LICENSE).

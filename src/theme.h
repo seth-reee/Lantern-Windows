@@ -18,8 +18,8 @@ public:
     QVariantMap colors() const { return m_colors; }
     QString iconSource() const {
         return m_colors.value("background").value<QColor>().lightnessF() < 0.5
-            ? "qrc:/resources/icons/lantern-black.png"
-            : "qrc:/resources/icons/lantern-white.png";
+            ? "qrc:/resources/icons/lantern-white.png"
+            : "qrc:/resources/icons/lantern-black.png";
     }
 signals:
     void changed();

@@ -4,3 +4,4 @@
 /dist/
 *.pkg.tar.zst
 /.qmlls.build.ini
+__pycache__/

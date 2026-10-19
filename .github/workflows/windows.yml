@@ -31,10 +31,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           windeployqt --release --qmldir "$PWD/qml" --compiler-runtime "$PWD/dist/Lantern-Windows/lantern.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $licensePath = Join-Path $env:QT_ROOT_DIR 'Licenses'
-          if (!(Test-Path $licensePath)) { $licensePath = Join-Path (Split-Path $env:QT_ROOT_DIR) 'Licenses' }
-          if (!(Test-Path $licensePath)) { throw 'Qt license folder missing' }
-          Copy-Item $licensePath dist/Lantern-Windows/qt-licenses -Recurse
+          python packaging/windows/collect-qt-notices.py dist/Lantern-Windows/qt-licenses
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item README.md dist/Lantern-Windows/README.md
       - name: Smoke test deployed application without Qt on PATH
         shell: pwsh

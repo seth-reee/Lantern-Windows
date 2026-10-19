@@ -53,11 +53,17 @@ jobs:
           Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:QML_IMPORT_PATH -ErrorAction SilentlyContinue
-          $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QT_QPA_PLATFORM = 'windows'
           $env:QT_QUICK_BACKEND = 'software'
           try {
-            & "$package/ui_tests.exe"
-            if ($LASTEXITCODE -ne 0) { throw 'Packaged UI, menus, or export dialog failed' }
+            $testOut = "$env:RUNNER_TEMP/lantern-ui-stdout.txt"
+            $testErr = "$env:RUNNER_TEMP/lantern-ui-stderr.txt"
+            $test = Start-Process -FilePath "$package/ui_tests.exe" -PassThru -RedirectStandardOutput $testOut -RedirectStandardError $testErr
+            $finished = $test.WaitForExit(60000)
+            if (!$finished) { $test.Kill() }
+            Get-Content $testOut, $testErr
+            if (!$finished) { throw 'Packaged UI test timed out' }
+            if ($test.ExitCode -ne 0) { throw 'Packaged UI, menus, or export dialog failed' }
           } finally {
             Remove-Item "$package/ui_tests.exe", "$package/Qt6Test.dll"
           }

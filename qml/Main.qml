@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtCore
@@ -161,7 +161,7 @@ ApplicationWindow {
   ProgressBar { Layout.fillWidth: true; from: 0; to: Math.max(1,scanner.total); value: scanner.completed; implicitHeight: 4 }
   RowLayout { Label { objectName: "scanTimer"; text: "Scanned in: " + (scanner.elapsedMs / 1000).toFixed(1) + " s" } Label { text: scanner.message || "Ready"; Layout.fillWidth: true; elide: Text.ElideRight } Label { text: "No reply can mean ping is blocked"; opacity: 0.5; font.pixelSize: 11 } }
  }
- FileDialog { id: exportDialog; title: "Export scan results"; fileMode: FileDialog.SaveFile; defaultSuffix: "csv"; nameFilters: ["CSV files (*.csv)"]; currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation); onAccepted: scanner.exportCsv(selectedFile) }
+ FileDialog { id: exportDialog; objectName: "exportDialog"; title: "Export scan results"; fileMode: FileDialog.SaveFile; defaultSuffix: "csv"; nameFilters: ["CSV files (*.csv)"]; currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation); onAccepted: scanner.exportCsv(selectedFile) }
  Dialog { id: about; objectName: "aboutDialog"; title: "About Lantern"; anchors.centerIn: parent; modal: true; standardButtons: Dialog.Close; width: 580
   contentItem: ColumnLayout { spacing: 10
    Image { source: theme.iconSource; sourceSize.width: 72; sourceSize.height: 72; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }

@@ -27,6 +27,12 @@ Target: Windows 11 x64, MSVC 2022, Qt 6.8.3, C++20, CMake/Ninja.
   executable with development paths removed, verifies app-local Qt/MSVC DLL imports,
   and uploads a ZIP and SHA-256 checksum. Microsoft C++ runtime DLLs are bundled
   directly, without requiring a separate runtime installer.
+- English-only deployment with the Basic control style; translations, unused
+  style plugins/DLLs, IDE type metadata, QML debugging plugins, and optional
+  software OpenGL are excluded. Qt notices are retained in one document.
+- The trimmed package is tested with development paths removed: populated UI,
+  menus, CSV export dialog, and rendered startup frames through both Qt software
+  rendering and Direct3D 11/WARP.
 - Separate repository with upstream history. Original Linux Lantern is unchanged;
   inherited Arch packaging and publishing automation have been removed.
 

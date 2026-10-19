@@ -25,8 +25,10 @@ int main(int argc,char **argv) {
  QObject::connect(&engine,&QQmlApplicationEngine::objectCreationFailed,&app,[] { QCoreApplication::exit(1); },Qt::QueuedConnection);
  engine.loadFromModule("Lantern","Main");
  if(app.arguments().contains("--smoke-test")) QTimer::singleShot(700,&app,[&]() {
-  if(auto *window=qobject_cast<QQuickWindow*>(engine.rootObjects().value(0))) window->grabWindow().save(QDir::temp().filePath("lantern-preview.png"));
-  app.quit();
+  auto *window=qobject_cast<QQuickWindow*>(engine.rootObjects().value(0));
+  if(!window) { app.exit(1); return; }
+  const auto frame=window->grabWindow();
+  app.exit(!frame.isNull() && frame.save(QDir::temp().filePath("lantern-preview.png")) ? 0 : 1);
  });
  return app.exec();
 }

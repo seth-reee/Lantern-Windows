@@ -81,6 +81,15 @@ private slots:
   QCOMPARE(background->property("color").value<QColor>(),QColor(theme.colors()["selection"].toString()));
   copy->window()->grabWindow().save(QDir::temp().filePath("lantern-menu-preview.png"));
   QVERIFY(QMetaObject::invokeMethod(menu,"close"));
+  QTest::qWait(150);
+  auto *exporter=window->findChild<QObject*>("exportDialog"); QVERIFY(exporter);
+  exporter->setProperty("currentFolder",QUrl::fromLocalFile(QDir::tempPath()));
+  QVERIFY(QMetaObject::invokeMethod(exporter,"open"));
+  QTRY_VERIFY(exporter->property("visible").toBool());
+  QTest::qWait(150);
+  QVERIFY2(warnings.isEmpty(),qPrintable(warnings.join('\n')));
+  QVERIFY(QMetaObject::invokeMethod(exporter,"close"));
+  QTest::qWait(150);
   hosts.filter("nothing-matches",""); QTRY_COMPARE(results->property("count").toInt(),0);
   hosts.filter("127.0.0.2","Live"); QTRY_COMPARE(results->property("count").toInt(),1);
   scanner.start("127.42.0.0/16",false,false,200,1);

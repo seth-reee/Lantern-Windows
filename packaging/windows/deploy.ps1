@@ -6,8 +6,10 @@ $ErrorActionPreference = 'Stop'
 $Destination = [IO.Path]::GetFullPath($Destination)
 cmake --install $BuildDir --prefix $Destination
 if ($LASTEXITCODE -ne 0) { throw 'Application install failed' }
-windeployqt --release --qmldir "$PSScriptRoot/../../qml" --no-compiler-runtime "$Destination/lantern.exe"
+windeployqt --release --qmldir "$PSScriptRoot/../../qml" --no-compiler-runtime --no-translations --no-opengl-sw --skip-plugin-types qmltooling "$Destination/lantern.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Qt runtime deployment failed' }
+python "$PSScriptRoot/trim-package.py" $Destination
+if ($LASTEXITCODE -ne 0) { throw 'Package trimming failed' }
 
 # Bundle the redistributable CRT DLLs beside the EXE, rather than requiring users
 # to install vc_redist.x64.exe. Windows 11 supplies the Universal CRT/system DLLs.
@@ -35,6 +37,6 @@ Get-ChildItem $Destination -Recurse -File | Where-Object { $_.Extension -in '.ex
     }
 }
 
-python "$PSScriptRoot/collect-qt-notices.py" "$Destination/qt-licenses"
+python "$PSScriptRoot/collect-qt-notices.py" "$Destination/QT-NOTICES.txt"
 if ($LASTEXITCODE -ne 0) { throw 'Qt license collection failed' }
 Copy-Item "$PSScriptRoot/../../README.md" "$Destination/README.md"

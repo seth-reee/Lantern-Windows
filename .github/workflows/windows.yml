@@ -43,18 +43,38 @@ jobs:
       - name: Deploy Qt and app-local MSVC runtime; verify DLL dependencies
         shell: pwsh
         run: ./packaging/windows/deploy.ps1
-      - name: Smoke test deployed application without Qt on PATH
+      - name: Test packaged UI and rendered frames without Qt on PATH
         shell: pwsh
         run: |
+          $package = "$PWD/dist/Lantern-Windows"
+          Copy-Item build/ui_tests.exe "$package/ui_tests.exe"
+          Copy-Item "$env:QT_ROOT_DIR/bin/Qt6Test.dll" "$package/Qt6Test.dll"
           $env:PATH = "$env:SystemRoot/system32;$env:SystemRoot"
           Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:QML_IMPORT_PATH -ErrorAction SilentlyContinue
-          $env:QT_QPA_PLATFORM = 'windows'
+          $env:QT_QPA_PLATFORM = 'offscreen'
           $env:QT_QUICK_BACKEND = 'software'
-          $app = Start-Process -FilePath "$PWD/dist/Lantern-Windows/lantern.exe" -ArgumentList '--smoke-test' -PassThru
-          if (!$app.WaitForExit(30000)) { $app.Kill(); throw 'Deployed application timed out' }
-          if ($app.ExitCode -ne 0) { throw "Deployed application exited $($app.ExitCode)" }
+          try {
+            & "$package/ui_tests.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged UI, menus, or export dialog failed' }
+          } finally {
+            Remove-Item "$package/ui_tests.exe", "$package/Qt6Test.dll"
+          }
+          $env:QT_QPA_PLATFORM = 'windows'
+          foreach ($backend in @('software', 'd3d11')) {
+            if ($backend -eq 'd3d11') {
+              Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+              $env:QSG_RHI_BACKEND = 'd3d11'
+              $env:QSG_RHI_PREFER_SOFTWARE_RENDERER = '1'
+            }
+            $app = Start-Process -FilePath "$package/lantern.exe" -ArgumentList '--smoke-test' -PassThru
+            if (!$app.WaitForExit(30000)) { $app.Kill(); throw "Packaged $backend renderer timed out" }
+            if ($app.ExitCode -ne 0) { throw "Packaged $backend renderer exited $($app.ExitCode)" }
+          }
+          $files = @(Get-ChildItem $package -Recurse -File)
+          $bytes = ($files | Measure-Object Length -Sum).Sum
+          "Package: $($files.Count) files, $([math]::Round($bytes / 1MB, 2)) MiB extracted" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
       - name: Create ZIP and checksum
         shell: pwsh
         run: |

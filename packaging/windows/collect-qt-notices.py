@@ -13,8 +13,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 VERSION = "6.8.3"
-MODULES = ("qtbase", "qtdeclarative", "qtsvg", "qtimageformats", "qtshadertools", "qttranslations")
-DESTINATION = Path(sys.argv[1])
+MODULES = ("qtbase", "qtdeclarative", "qtsvg", "qtimageformats", "qtshadertools")
+OUTPUT = Path(sys.argv[1])
 
 
 def collect(module):
@@ -58,5 +58,19 @@ def collect(module):
     print(f"Collected {len(selected)} license/attribution files for {module}", flush=True)
 
 
-with ThreadPoolExecutor(max_workers=3) as workers:
-    list(workers.map(collect, MODULES))
+# Keep every collected notice byte, but ship one document instead of hundreds
+# of tiny files. Per-file headers retain module, path, and source provenance.
+with tempfile.TemporaryDirectory() as directory:
+    DESTINATION = Path(directory)
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        list(workers.map(collect, MODULES))
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT.open("wb") as document:
+        document.write(b"Qt 6.8.3 license texts and third-party attributions\n")
+        for file in sorted(DESTINATION.rglob("*")):
+            if file.is_file():
+                heading = str(file.relative_to(DESTINATION)).replace("\\", "/")
+                document.write(("\n\n" + "=" * 72 + "\n" + heading + "\n" + "=" * 72 + "\n").encode("utf-8"))
+                document.write(file.read_bytes())
+                document.write(b"\n")
+    print(f"Consolidated notices into {OUTPUT}", flush=True)

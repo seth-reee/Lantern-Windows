@@ -16,7 +16,7 @@ select a successful Windows build, and download the **Lantern-Windows-x64** arti
 `Lantern-Windows-x64.zip` and run `Lantern-Windows/lantern.exe`.
 Keep the executable with the accompanying folders and DLLs. No Qt installation
 or application installer is needed. The ZIP includes the Microsoft C++ runtime
-DLLs beside the executable; Windows supplies standard OS DLLs. Preview builds are unsigned.
+DLLs beside the executable; Windows supplies standard OS DLLs. Builds are unsigned.
 
 Launch and scanning were confirmed by the user in a Windows test VM on
 2026-10-19. Theme changes, high DPI, hardware rendering, and detailed network
@@ -53,6 +53,12 @@ not service identification or UDP scans.
 Right-click a row to copy its IP/details; double-click to copy its IP. Ctrl+F
 focuses search; Escape stops scanning. Export includes every row regardless of
 view filters. The display keeps Lantern's custom layout while using system colors.
+
+The package is English-only and includes only the Basic control style used by
+Lantern. Unused style libraries, translations, development metadata, and the
+optional software OpenGL library are omitted. Normal Windows rendering uses
+Direct3D; the Direct3D software-rendering fallback remains available. Qt license
+texts and third-party attributions are consolidated in `QT-NOTICES.txt`.
 
 ## Build on Windows
 

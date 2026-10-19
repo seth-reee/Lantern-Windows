@@ -89,7 +89,7 @@ check and populated UI/system-palette checks are included.
 
 ## Releases
 
-Pushes to `main` build/test/package development artifacts. Pushing a version tag
+Pushes to `master` build/test/package development artifacts. Pushing a version tag
 such as `v0.1.0` builds and publishes a GitHub Release with the portable Windows ZIP
 and `SHA256SUMS.txt`, after all tests and the packaged startup check pass.
 The tag must match `project(... VERSION ...)` in CMakeLists.txt. That version also

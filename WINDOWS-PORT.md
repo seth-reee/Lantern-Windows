@@ -8,11 +8,16 @@ Target: Windows 11 x64, MSVC 2022, Qt 6.8.3, C++20, CMake/Ninja.
 
 - Native ICMP through IcmpCreateFile/IcmpSendEcho/IcmpCloseHandle, with structured
   reply/error handling and millisecond latency. Windows ping output is never parsed.
-- Probe workers use QtConcurrent and own their resources. The GUI stays responsive.
-  Stopping destroys completion watchers and cancels queued work through a shared
-  token; already running calls finish within their bounded timeout. Late results
-  cannot update destroyed model rows or a new scan. Qt's global pool adds a bound
-  on executing workers in addition to the scanner's 1–64 active-host limit.
+- Entire host probes (ICMP, TCP socket setup/events/timeouts, and MAC lookup) run
+  through QtConcurrent in a dedicated pool matching the selected 1–64 host limit,
+  independently of CPU core count. TCP uses numeric addresses and direct sockets.
+  Only model updates and asynchronous, bounded DNS callbacks run on the GUI thread.
+  Stopping cancels queued work and detaches completion watchers immediately; running
+  probes check a shared token between calls and during their socket event loop.
+  Late results cannot update destroyed model rows or a replacement scan. Windows
+  socket setup can exceed the configured timeout on affected machines, but these
+  calls no longer block the GUI. A running OS call must return before its worker
+  can stop; closing the application waits for those workers.
 - Windows neighbor MAC lookup uses GetIpNetTable2/FreeMibTable, rejects unresolved
   or invalid entries, and retains local-interface MAC lookup through Qt.
 - System application palette with live changes; no Omarchy file polling.
@@ -50,7 +55,7 @@ state, and detailed DNS/MAC/port results were not specified.
   Neighbor lookup is best effort and enumerates the table per completed host;
   profile/cache it if large live scans expose a bottleneck.
 - Scan /16, stop/restart/close mid-scan and during DNS; check resource use and UI
-  responsiveness. Running native calls can take up to the probe timeout to finish.
+  responsiveness. An OS call that exceeds its timeout can delay worker shutdown.
 - Change Windows light/dark, accent, and contrast settings while the app is open;
   inspect labels, menus, disabled controls, and status colors. Check 100–200% DPI
   and hardware graphics. Qt palette unit tests cannot substitute for these checks.

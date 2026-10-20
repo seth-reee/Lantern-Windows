@@ -16,6 +16,7 @@
 #include <QtConcurrentRun>
 #include <QElapsedTimer>
 #include <QNetworkProxy>
+#include <QEventLoop>
 #include "diagnosticlog.h"
 
 Scanner::Scanner(QObject *p, PingFunction ping):QAbstractListModel(p),m_ping(std::move(ping)) {
@@ -77,10 +78,12 @@ void Scanner::start(const QString &range,bool dns,bool ports,int timeout,int con
  m_cancelled=std::make_shared<std::atomic_bool>(false);
  beginResetModel(); m_hosts.clear(); m_hosts.reserve(addresses.size()); for(auto a:addresses) { Host h; h.address=a; h.ip=QHostAddress(a).toString(); m_hosts.append(h); } endResetModel();
  m_dns=dns; m_ports=ports; m_timeout=qBound(200,timeout,5000); m_limit=qBound(1,concurrency,64);
+ m_pool.setMaxThreadCount(m_limit);
  m_next=m_completed=m_alive=m_silent=m_active=0; m_clock.start(); m_elapsedMs=0; m_running=true; m_tick.start(); m_message="Scanning…"; emit changed();
  m_lastDiagnosticHeartbeat=0;
  diagnosticLog(QStringLiteral("scan_start range=%1 total=%2 dns=%3 ports=%4 timeout_ms=%5 concurrency=%6")
   .arg(range.trimmed()).arg(m_hosts.size()).arg(m_dns).arg(m_ports).arg(m_timeout).arg(m_limit));
+ diagnosticLog(QStringLiteral("scan_backend=worker_pool pool_max_threads=%1 numeric_tcp=1").arg(m_pool.maxThreadCount()));
  pump();
 }
 void Scanner::pump() {
@@ -92,79 +95,134 @@ void Scanner::pump() {
   emit changed();
  }
 }
+namespace {
+struct ProbeResult {
+ PingResult ping;
+ QStringList open;
+ QString mac;
+ bool live=false;
+};
+
+// Everything here belongs to a pool worker. Platform socket setup can block
+// before returning to Qt, so even asynchronous sockets must stay off the GUI.
+ProbeResult probeHost(const QString &ip,int row,int timeout,bool ports,
+ const PingFunction &ping,const std::shared_ptr<std::atomic_bool> &cancelled) {
+ ProbeResult result;
+ if(cancelled->load()) return result;
+ diagnosticLog(QStringLiteral("worker_begin row=%1 ip=%2").arg(row).arg(ip));
+ result.ping=ping(ip,timeout);
+ result.live=result.ping.live;
+ if(cancelled->load()) return result;
+ if(ports) {
+  const QList<int> targets={21,22,23,25,53,80,110,139,143,443,445,587,631,993,995,1433,3306,3389,5432,5900,8000,8080,8443};
+  QObject owner;
+  QEventLoop loop;
+  int pending=0;
+  bool launching=true;
+  QTimer cancellation;
+  cancellation.setInterval(25);
+  QObject::connect(&cancellation,&QTimer::timeout,&loop,[&]() {
+   if(cancelled->load()) loop.quit();
+  });
+  cancellation.start();
+  QElapsedTimer portsClock; portsClock.start();
+  diagnosticLog(QStringLiteral("tcp_begin row=%1 ip=%2 ports=%3 timeout_ms=%4")
+   .arg(row).arg(ip).arg(targets.size()).arg(timeout));
+  const QHostAddress address(ip);
+  for(int port:targets) {
+   if(cancelled->load()) break;
+   auto *socket=new QTcpSocket(&owner);
+   socket->setProxy(QNetworkProxy::NoProxy);
+   auto *timer=new QTimer(socket); timer->setSingleShot(true);
+   ++pending;
+   auto ended=std::make_shared<bool>(false);
+   auto finish=[&,socket,timer,ended]() {
+    if(*ended) return;
+    *ended=true;
+    timer->stop(); socket->abort(); socket->deleteLater();
+    if(--pending==0 && !launching) loop.quit();
+   };
+   QObject::connect(socket,&QTcpSocket::connected,&owner,[&,port,finish]() {
+    result.live=true; result.open.append(QString::number(port)); finish();
+   });
+   QObject::connect(socket,&QTcpSocket::errorOccurred,&owner,[finish](QAbstractSocket::SocketError) { finish(); });
+   QObject::connect(timer,&QTimer::timeout,&owner,finish);
+   timer->start(timeout);
+   diagnosticLog(QStringLiteral("tcp_connect_call_begin row=%1 ip=%2 port=%3 proxy=NoProxy")
+    .arg(row).arg(ip).arg(port));
+   QElapsedTimer callClock; callClock.start();
+   // Numeric addresses avoid hostname resolution in the connect path.
+   socket->connectToHost(address,quint16(port));
+   const auto elapsed=callClock.elapsed();
+   diagnosticLog(QStringLiteral("tcp_connect_call_return row=%1 ip=%2 port=%3 elapsed_ms=%4 state=%5")
+    .arg(row).arg(ip).arg(port).arg(elapsed).arg(int(socket->state())));
+   // Service existing sockets and deadlines between setup calls as well as
+   // after the batch. A slow setup must not postpone every earlier timeout.
+   loop.processEvents(QEventLoop::AllEvents);
+  }
+  launching=false;
+  if(pending && !cancelled->load()) loop.exec();
+  // Disconnect before teardown while all callback state is still in scope.
+  for(auto *socket:owner.findChildren<QTcpSocket*>()) {
+   QObject::disconnect(socket,nullptr,&owner,nullptr);
+   socket->abort();
+  }
+  diagnosticLog(QStringLiteral("tcp_end row=%1 ip=%2 elapsed_ms=%3 cancelled=%4 open_ports=%5")
+   .arg(row).arg(ip).arg(portsClock.elapsed()).arg(cancelled->load()).arg(result.open.join(',')));
+ }
+ if(cancelled->load()) return result;
+ diagnosticLog(QStringLiteral("mac_lookup_begin row=%1 ip=%2").arg(row).arg(ip));
+ QElapsedTimer macClock; macClock.start();
+ result.mac=neighborMac(ip);
+ diagnosticLog(QStringLiteral("mac_lookup_end row=%1 ip=%2 elapsed_ms=%3 found=%4")
+  .arg(row).arg(ip).arg(macClock.elapsed()).arg(!result.mac.isEmpty()));
+ return result;
+}
+}
+
 void Scanner::probe(int row) {
  auto *job=new QObject(this); m_jobs.insert(job);
  auto &host=m_hosts[row]; host.status="Scanning"; update(row);
  diagnosticLog(QStringLiteral("host_start row=%1 ip=%2").arg(row).arg(host.ip));
- struct State { int pending=1; bool live=false; QStringList open; QElapsedTimer portsTimer, hostTimer; };
- auto state=std::make_shared<State>();
- state->hostTimer.start();
- auto complete=[this,row,job,state]() {
-  if(--state->pending) return;
-  diagnosticLog(QStringLiteral("probe_network_complete row=%1 ip=%2 live=%3 open_ports=%4 tcp_elapsed_ms=%5")
-   .arg(row).arg(m_hosts[row].ip).arg(state->live).arg(state->open.join(QStringLiteral(","))).arg(state->portsTimer.isValid()?state->portsTimer.elapsed():0));
-  auto &h=m_hosts[row]; h.status=state->live?"Live":"No reply"; std::sort(state->open.begin(),state->open.end(),[](const QString &a,const QString &b) { return a.toInt()<b.toInt(); }); h.ports=state->open.join(", ");
+ auto *watcher=new QFutureWatcher<ProbeResult>(job);
+ const auto cancelled=m_cancelled;
+ connect(watcher,&QFutureWatcher<ProbeResult>::finished,job,[this,row,job,watcher,cancelled]() {
+  if(cancelled->load()) return;
+  const auto result=watcher->result();
+  auto &h=m_hosts[row];
+  h.status=result.live?"Live":"No reply";
+  h.latency=result.ping.latency; h.detail=result.ping.error; h.mac=result.mac;
+  auto open=result.open;
+  std::sort(open.begin(),open.end(),[](const QString &a,const QString &b) { return a.toInt()<b.toInt(); });
+  h.ports=open.join(", ");
   if(h.ports.isEmpty()) h.ports=m_ports?"None detected":"Not checked";
   auto done=[this,row,job]() { m_jobs.remove(job); job->deleteLater(); finish(row); };
-  if(m_dns && state->live) {
+  if(m_dns && result.live) {
    auto *timer=new QTimer(job); timer->setSingleShot(true);
    diagnosticLog(QStringLiteral("dns_begin row=%1 ip=%2").arg(row).arg(h.ip));
    const int lookup=QHostInfo::lookupHost(h.ip,job,[this,row,timer,done](const QHostInfo &info) {
-    if(!timer->isActive()) return; timer->stop();
+    if(!timer->isActive()) return;
+    timer->stop();
     if(info.error()==QHostInfo::NoError && info.hostName()!=m_hosts[row].ip) m_hosts[row].hostname=info.hostName();
     diagnosticLog(QStringLiteral("dns_end row=%1 ip=%2 error=%3 hostname_found=%4")
      .arg(row).arg(m_hosts[row].ip).arg(info.errorString()).arg(!m_hosts[row].hostname.isEmpty()));
     done();
    });
-   connect(timer,&QTimer::timeout,job,[this,row,lookup,done]() { diagnosticLog(QStringLiteral("dns_timeout row=%1 ip=%2 limit_ms=2000").arg(row).arg(m_hosts[row].ip)); QHostInfo::abortHostLookup(lookup); done(); }); timer->start(2000);
+   connect(timer,&QTimer::timeout,job,[this,row,lookup,done]() {
+    diagnosticLog(QStringLiteral("dns_timeout row=%1 ip=%2 limit_ms=2000").arg(row).arg(m_hosts[row].ip));
+    QHostInfo::abortHostLookup(lookup); done();
+   });
+   timer->start(2000);
   } else done();
- };
- // Workers own their arguments and resources. Destroying the job disconnects the
- // watcher; cancelled or superseded scans can never update model rows.
- auto *watcher=new QFutureWatcher<PingResult>(job);
- connect(watcher,&QFutureWatcher<PingResult>::finished,job,[this,row,watcher,state,complete]() {
-  const auto result=watcher->result();
-  state->live=state->live || result.live;
-  m_hosts[row].latency=result.latency;
-  m_hosts[row].detail=result.error;
-  complete();
  });
- const auto cancelled=m_cancelled;
- watcher->setFuture(QtConcurrent::run([ping=m_ping,ip=host.ip,timeout=m_timeout,cancelled]() {
-  return cancelled->load() ? PingResult{} : ping(ip,timeout);
+ // Capture values only: cancelled or destroyed models are never accessed by a
+ // worker. QFutureWatcher delivers the result back on the model's GUI thread.
+ watcher->setFuture(QtConcurrent::run(&m_pool,[ip=host.ip,row,timeout=m_timeout,ports=m_ports,ping=m_ping,cancelled]() {
+  return probeHost(ip,row,timeout,ports,ping,cancelled);
  }));
- if(m_ports) {
-  const QList<int> ports={21,22,23,25,53,80,110,139,143,443,445,587,631,993,995,1433,3306,3389,5432,5900,8000,8080,8443};
-  state->pending+=ports.size();
-  state->portsTimer.start();
-  diagnosticLog(QStringLiteral("tcp_begin row=%1 ip=%2 ports=%3 timeout_ms=%4")
-   .arg(row).arg(host.ip).arg(ports.size()).arg(m_timeout));
-  for(int port:ports) {
-   auto *socket=new QTcpSocket(job); auto *timer=new QTimer(socket); timer->setSingleShot(true);
-   // LAN port probes must connect directly rather than use system proxy settings.
-   socket->setProxy(QNetworkProxy::NoProxy);
-   auto ended=std::make_shared<bool>(false);
-   auto finishSocket=[socket,timer,ended,complete]() { if(*ended) return; *ended=true; timer->stop(); socket->abort(); socket->deleteLater(); complete(); };
-   connect(socket,&QTcpSocket::connected,job,[state,port,finishSocket]() { state->live=true; state->open.append(QString::number(port)); finishSocket(); });
-   connect(socket,&QTcpSocket::errorOccurred,job,[finishSocket](QAbstractSocket::SocketError) { finishSocket(); });
-   connect(timer,&QTimer::timeout,job,finishSocket); timer->start(m_timeout);
-   diagnosticLog(QStringLiteral("tcp_connect_call_begin row=%1 ip=%2 port=%3 proxy=NoProxy")
-    .arg(row).arg(host.ip).arg(port));
-   QElapsedTimer connectCall; connectCall.start();
-   socket->connectToHost(host.ip,port);
-   const qint64 connectCallElapsed=connectCall.elapsed();
-   diagnosticLog(QStringLiteral("tcp_connect_call_return row=%1 ip=%2 port=%3 elapsed_ms=%4 state=%5")
-    .arg(row).arg(host.ip).arg(port).arg(connectCallElapsed).arg(int(socket->state())));
-  }
- }
 }
 void Scanner::finish(int row) {
  auto &host=m_hosts[row];
- diagnosticLog(QStringLiteral("mac_lookup_begin row=%1 ip=%2").arg(row).arg(host.ip));
- QElapsedTimer macTimer; macTimer.start();
- host.mac=neighborMac(host.ip);
- diagnosticLog(QStringLiteral("mac_lookup_end row=%1 ip=%2 elapsed_ms=%3 found=%4")
-  .arg(row).arg(host.ip).arg(macTimer.elapsed()).arg(!host.mac.isEmpty()));
  --m_active; ++m_completed;
  if(m_hosts[row].status=="Live") ++m_alive; else if(!m_hosts[row].detail.isEmpty()) m_hosts[row].status="Error"; else ++m_silent;
  diagnosticLog(QStringLiteral("host_finish row=%1 ip=%2 status=%3 mac=%4 completed=%5 total=%6")
@@ -176,6 +234,7 @@ void Scanner::stop() {
  diagnosticLog(QStringLiteral("scan_stop completed=%1 total=%2 active=%3").arg(m_completed).arg(m_hosts.size()).arg(m_active));
  m_elapsedMs=m_clock.elapsed(); m_tick.stop(); m_running=false;
  m_cancelled->store(true);
+ m_pool.clear();
  for(auto *job:std::as_const(m_jobs)) {
   // Disconnect callbacks before killing probes; preserve completed results.
   for(auto *child:job->findChildren<QObject*>()) child->disconnect();

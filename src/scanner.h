@@ -8,6 +8,7 @@
 #include <QUrl>
 #include <QElapsedTimer>
 #include <QTimer>
+#include <QThreadPool>
 
 struct Host { QString ip, status = "Queued", hostname, latency, ports, detail, mac; quint32 address; };
 class Scanner : public QAbstractListModel {
@@ -44,6 +45,7 @@ public:
  Q_INVOKABLE void copy(const QString &);
 signals: void changed();
 private:
+ QThreadPool m_pool;
  PingFunction m_ping;
  std::shared_ptr<std::atomic_bool> m_cancelled;
  QElapsedTimer m_clock;

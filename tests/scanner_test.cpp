@@ -44,6 +44,34 @@ private slots:
   scanner.stop(); const auto stopped=scanner.elapsedMs();
   QTest::qWait(120); QCOMPARE(scanner.elapsedMs(),stopped);
  }
+ void workerConcurrencyAndResponsiveness() {
+  const auto guiThread=QThread::currentThread();
+  auto entered=std::make_shared<std::atomic_int>(0);
+  auto wrongThread=std::make_shared<std::atomic_bool>(false);
+  Scanner scanner(nullptr,[guiThread,entered,wrongThread](const QString &,int) {
+   if(QThread::currentThread()==guiThread) wrongThread->store(true);
+   ++*entered;
+   QThread::msleep(600);
+   return PingResult{};
+  });
+  int ticks=0;
+  QTimer heartbeat; heartbeat.setInterval(10);
+  connect(&heartbeat,&QTimer::timeout,this,[&ticks] { ++ticks; });
+  heartbeat.start();
+  scanner.start("127.0.0.1-127.0.0.8",false,true,200,8);
+  QTRY_COMPARE_WITH_TIMEOUT(entered->load(),8,500);
+  QVERIFY(!wrongThread->load());
+  QVERIFY(scanner.running());
+  QTRY_VERIFY_WITH_TIMEOUT(ticks>0,500);
+  scanner.stop();
+  QVERIFY(!scanner.running());
+  // A replacement scan must survive late results from cancelled TCP workers.
+  scanner.start("127.0.0.9",false,true,200,8);
+  QTRY_VERIFY_WITH_TIMEOUT(!scanner.running(),4000);
+  QCOMPARE(scanner.total(),1);
+  QCOMPARE(scanner.completed(),1);
+  QCOMPARE(scanner.data(scanner.index(0),Scanner::Ip).toString(),QString("127.0.0.9"));
+ }
  void cancellationAndRestart() {
   // A delayed result from the first scan must not overwrite the new scan.
   auto probe=[](const QString &ip,int) {

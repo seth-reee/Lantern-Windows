@@ -15,6 +15,7 @@
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
 #include <QElapsedTimer>
+#include <QNetworkProxy>
 #include "diagnosticlog.h"
 
 Scanner::Scanner(QObject *p, PingFunction ping):QAbstractListModel(p),m_ping(std::move(ping)) {
@@ -140,11 +141,19 @@ void Scanner::probe(int row) {
    .arg(row).arg(host.ip).arg(ports.size()).arg(m_timeout));
   for(int port:ports) {
    auto *socket=new QTcpSocket(job); auto *timer=new QTimer(socket); timer->setSingleShot(true);
+   // LAN port probes must connect directly rather than use system proxy settings.
+   socket->setProxy(QNetworkProxy::NoProxy);
    auto ended=std::make_shared<bool>(false);
    auto finishSocket=[socket,timer,ended,complete]() { if(*ended) return; *ended=true; timer->stop(); socket->abort(); socket->deleteLater(); complete(); };
    connect(socket,&QTcpSocket::connected,job,[state,port,finishSocket]() { state->live=true; state->open.append(QString::number(port)); finishSocket(); });
    connect(socket,&QTcpSocket::errorOccurred,job,[finishSocket](QAbstractSocket::SocketError) { finishSocket(); });
-   connect(timer,&QTimer::timeout,job,finishSocket); timer->start(m_timeout); socket->connectToHost(host.ip,port);
+   connect(timer,&QTimer::timeout,job,finishSocket); timer->start(m_timeout);
+   QElapsedTimer connectCall; connectCall.start();
+   diagnosticLog(QStringLiteral("tcp_connect_call_begin row=%1 ip=%2 port=%3 proxy=NoProxy")
+    .arg(row).arg(host.ip).arg(port));
+   socket->connectToHost(host.ip,port);
+   diagnosticLog(QStringLiteral("tcp_connect_call_return row=%1 ip=%2 port=%3 elapsed_ms=%4 state=%5")
+    .arg(row).arg(host.ip).arg(port).arg(connectCall.elapsed()).arg(int(socket->state())));
   }
  }
 }

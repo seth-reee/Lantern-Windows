@@ -14,8 +14,21 @@
 #include <QFile>
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
+#include <QElapsedTimer>
+#include "diagnosticlog.h"
 
-Scanner::Scanner(QObject *p, PingFunction ping):QAbstractListModel(p),m_ping(std::move(ping)) { m_tick.setInterval(100); connect(&m_tick,&QTimer::timeout,this,&Scanner::changed); }
+Scanner::Scanner(QObject *p, PingFunction ping):QAbstractListModel(p),m_ping(std::move(ping)) {
+ m_tick.setInterval(100);
+ connect(&m_tick,&QTimer::timeout,this,[this]() {
+  emit changed();
+  const qint64 elapsed=m_clock.elapsed();
+  if(m_running && elapsed-m_lastDiagnosticHeartbeat>=5000) {
+   m_lastDiagnosticHeartbeat=elapsed;
+   diagnosticLog(QStringLiteral("scan_heartbeat elapsed_ms=%1 completed=%2 total=%3 active=%4 queued=%5")
+    .arg(elapsed).arg(m_completed).arg(m_hosts.size()).arg(m_active).arg(m_hosts.size()-m_next));
+  }
+ });
+}
 Scanner::~Scanner() { stop(); }
 QHash<int,QByteArray> Scanner::roleNames() const { return {{Ip,"ip"},{Status,"status"},{Hostname,"hostname"},{Latency,"latency"},{Ports,"ports"},{Detail,"detail"},{Address,"address"},{Mac,"mac"}}; }
 QVariant Scanner::data(const QModelIndex &i,int role) const {
@@ -63,30 +76,46 @@ void Scanner::start(const QString &range,bool dns,bool ports,int timeout,int con
  m_cancelled=std::make_shared<std::atomic_bool>(false);
  beginResetModel(); m_hosts.clear(); m_hosts.reserve(addresses.size()); for(auto a:addresses) { Host h; h.address=a; h.ip=QHostAddress(a).toString(); m_hosts.append(h); } endResetModel();
  m_dns=dns; m_ports=ports; m_timeout=qBound(200,timeout,5000); m_limit=qBound(1,concurrency,64);
- m_next=m_completed=m_alive=m_silent=m_active=0; m_clock.start(); m_elapsedMs=0; m_running=true; m_tick.start(); m_message="Scanning…"; emit changed(); pump();
+ m_next=m_completed=m_alive=m_silent=m_active=0; m_clock.start(); m_elapsedMs=0; m_running=true; m_tick.start(); m_message="Scanning…"; emit changed();
+ m_lastDiagnosticHeartbeat=0;
+ diagnosticLog(QStringLiteral("scan_start range=%1 total=%2 dns=%3 ports=%4 timeout_ms=%5 concurrency=%6")
+  .arg(range.trimmed()).arg(m_hosts.size()).arg(m_dns).arg(m_ports).arg(m_timeout).arg(m_limit));
+ pump();
 }
 void Scanner::pump() {
  while(m_running && m_active<m_limit && m_next<m_hosts.size()) { ++m_active; probe(m_next++); }
- if(m_running && m_completed==m_hosts.size()) { m_elapsedMs=m_clock.elapsed(); m_running=false; m_tick.stop(); m_message="Scan complete"; emit changed(); }
+ if(m_running && m_completed==m_hosts.size()) {
+  m_elapsedMs=m_clock.elapsed(); m_running=false; m_tick.stop(); m_message="Scan complete";
+  diagnosticLog(QStringLiteral("scan_complete elapsed_ms=%1 completed=%2 alive=%3 silent=%4")
+   .arg(m_elapsedMs).arg(m_completed).arg(m_alive).arg(m_silent));
+  emit changed();
+ }
 }
 void Scanner::probe(int row) {
  auto *job=new QObject(this); m_jobs.insert(job);
  auto &host=m_hosts[row]; host.status="Scanning"; update(row);
- struct State { int pending=1; bool live=false; QStringList open; };
+ diagnosticLog(QStringLiteral("host_start row=%1 ip=%2").arg(row).arg(host.ip));
+ struct State { int pending=1; bool live=false; QStringList open; QElapsedTimer portsTimer, hostTimer; };
  auto state=std::make_shared<State>();
+ state->hostTimer.start();
  auto complete=[this,row,job,state]() {
   if(--state->pending) return;
+  diagnosticLog(QStringLiteral("probe_network_complete row=%1 ip=%2 live=%3 open_ports=%4 tcp_elapsed_ms=%5")
+   .arg(row).arg(m_hosts[row].ip).arg(state->live).arg(state->open.join(QStringLiteral(","))).arg(state->portsTimer.isValid()?state->portsTimer.elapsed():0));
   auto &h=m_hosts[row]; h.status=state->live?"Live":"No reply"; std::sort(state->open.begin(),state->open.end(),[](const QString &a,const QString &b) { return a.toInt()<b.toInt(); }); h.ports=state->open.join(", ");
   if(h.ports.isEmpty()) h.ports=m_ports?"None detected":"Not checked";
   auto done=[this,row,job]() { m_jobs.remove(job); job->deleteLater(); finish(row); };
   if(m_dns && state->live) {
    auto *timer=new QTimer(job); timer->setSingleShot(true);
+   diagnosticLog(QStringLiteral("dns_begin row=%1 ip=%2").arg(row).arg(h.ip));
    const int lookup=QHostInfo::lookupHost(h.ip,job,[this,row,timer,done](const QHostInfo &info) {
     if(!timer->isActive()) return; timer->stop();
     if(info.error()==QHostInfo::NoError && info.hostName()!=m_hosts[row].ip) m_hosts[row].hostname=info.hostName();
+    diagnosticLog(QStringLiteral("dns_end row=%1 ip=%2 error=%3 hostname_found=%4")
+     .arg(row).arg(m_hosts[row].ip).arg(info.errorString()).arg(!m_hosts[row].hostname.isEmpty()));
     done();
    });
-   connect(timer,&QTimer::timeout,job,[lookup,done]() { QHostInfo::abortHostLookup(lookup); done(); }); timer->start(2000);
+   connect(timer,&QTimer::timeout,job,[this,row,lookup,done]() { diagnosticLog(QStringLiteral("dns_timeout row=%1 ip=%2 limit_ms=2000").arg(row).arg(m_hosts[row].ip)); QHostInfo::abortHostLookup(lookup); done(); }); timer->start(2000);
   } else done();
  };
  // Workers own their arguments and resources. Destroying the job disconnects the
@@ -106,6 +135,9 @@ void Scanner::probe(int row) {
  if(m_ports) {
   const QList<int> ports={21,22,23,25,53,80,110,139,143,443,445,587,631,993,995,1433,3306,3389,5432,5900,8000,8080,8443};
   state->pending+=ports.size();
+  state->portsTimer.start();
+  diagnosticLog(QStringLiteral("tcp_begin row=%1 ip=%2 ports=%3 timeout_ms=%4")
+   .arg(row).arg(host.ip).arg(ports.size()).arg(m_timeout));
   for(int port:ports) {
    auto *socket=new QTcpSocket(job); auto *timer=new QTimer(socket); timer->setSingleShot(true);
    auto ended=std::make_shared<bool>(false);
@@ -118,13 +150,20 @@ void Scanner::probe(int row) {
 }
 void Scanner::finish(int row) {
  auto &host=m_hosts[row];
+ diagnosticLog(QStringLiteral("mac_lookup_begin row=%1 ip=%2").arg(row).arg(host.ip));
+ QElapsedTimer macTimer; macTimer.start();
  host.mac=neighborMac(host.ip);
+ diagnosticLog(QStringLiteral("mac_lookup_end row=%1 ip=%2 elapsed_ms=%3 found=%4")
+  .arg(row).arg(host.ip).arg(macTimer.elapsed()).arg(!host.mac.isEmpty()));
  --m_active; ++m_completed;
  if(m_hosts[row].status=="Live") ++m_alive; else if(!m_hosts[row].detail.isEmpty()) m_hosts[row].status="Error"; else ++m_silent;
+ diagnosticLog(QStringLiteral("host_finish row=%1 ip=%2 status=%3 mac=%4 completed=%5 total=%6")
+  .arg(row).arg(host.ip,host.status,host.mac).arg(m_completed).arg(m_hosts.size()));
  update(row); emit changed(); pump();
 }
 void Scanner::stop() {
  if(!m_running) return;
+ diagnosticLog(QStringLiteral("scan_stop completed=%1 total=%2 active=%3").arg(m_completed).arg(m_hosts.size()).arg(m_active));
  m_elapsedMs=m_clock.elapsed(); m_tick.stop(); m_running=false;
  m_cancelled->store(true);
  for(auto *job:std::as_const(m_jobs)) {

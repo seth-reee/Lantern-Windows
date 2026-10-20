@@ -56,6 +56,7 @@ private:
  QList<Host> m_hosts;
  QSet<QObject*> m_jobs;
  int m_next=0, m_completed=0, m_alive=0, m_silent=0, m_active=0, m_limit=32, m_timeout=800;
+ qint64 m_lastDiagnosticHeartbeat=0;
  bool m_running=false, m_dns=true, m_ports=true;
  QString m_message;
 };

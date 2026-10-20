@@ -1,0 +1,12 @@
+Lantern diagnostic build
+
+Double-click Lantern-Diagnostics.cmd to run Lantern with detailed scanner logging.
+Reproduce the slow or frozen scan, wait about 30 seconds after progress stops,
+then close Lantern. The log is saved at:
+
+%LOCALAPPDATA%\Lantern\diagnostics.log
+
+The log records Windows and graphics settings, scan ranges and host IP addresses,
+probe timings, errors, and whether the UI heartbeat continued. It does not record
+reverse-DNS hostnames or packet contents. Review it for private network details
+before sharing it.

@@ -40,3 +40,4 @@ Get-ChildItem $Destination -Recurse -File | Where-Object { $_.Extension -in '.ex
 python "$PSScriptRoot/collect-qt-notices.py" "$Destination/QT-NOTICES.txt"
 if ($LASTEXITCODE -ne 0) { throw 'Qt license collection failed' }
 Copy-Item "$PSScriptRoot/../../README.md" "$Destination/README.md"
+Copy-Item "$PSScriptRoot/Lantern-Diagnostics.cmd", "$PSScriptRoot/DIAGNOSTICS.txt" $Destination

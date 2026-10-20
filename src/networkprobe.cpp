@@ -16,14 +16,23 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QRegularExpression>
+#include <QElapsedTimer>
 #include <vector>
 #include "scanner.h"
+#include "diagnosticlog.h"
 
 PingResult pingHost(const QString &ip, int timeout) {
 #ifdef Q_OS_WIN
+    QElapsedTimer timer;
+    timer.start();
+    diagnosticLog(QStringLiteral("icmp_begin ip=%1 timeout_ms=%2").arg(ip).arg(timeout));
     const HANDLE handle = IcmpCreateFile();
-    if (handle == INVALID_HANDLE_VALUE)
-        return {false, {}, QString("Cannot initialize ICMP (Windows error %1)").arg(GetLastError())};
+    if (handle == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        diagnosticLog(QStringLiteral("icmp_end ip=%1 elapsed_ms=%2 error=IcmpCreateFile:%3")
+            .arg(ip).arg(timer.elapsed()).arg(error));
+        return {false, {}, QString("Cannot initialize ICMP (Windows error %1)").arg(error)};
+    }
     char payload[] = "Lantern";
     std::vector<unsigned char> buffer(sizeof(ICMP_ECHO_REPLY) + sizeof(payload) + 8);
     // Qt's IPv4 integer is host order; IP Helper expects network byte order.
@@ -42,6 +51,8 @@ PingResult pingHost(const QString &ip, int timeout) {
         result.error = QString("ICMP failed (Windows error %1)").arg(error);
     }
     IcmpCloseHandle(handle);
+    diagnosticLog(QStringLiteral("icmp_end ip=%1 elapsed_ms=%2 live=%3 latency=%4 error=%5 status=%6")
+        .arg(ip).arg(timer.elapsed()).arg(result.live).arg(result.latency).arg(result.error).arg(error));
     return result;
 #else
     const QString executable = QStandardPaths::findExecutable("ping");

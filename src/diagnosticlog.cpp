@@ -44,5 +44,11 @@ void diagnosticLog(const QString &message)
         .arg(threadId, 0, 16)
         .arg(message);
     logFile.write(line.toUtf8());
-    logFile.flush();
+}
+
+void flushDiagnosticLog()
+{
+    QMutexLocker lock(&logMutex);
+    if (logFile.isOpen())
+        logFile.flush();
 }

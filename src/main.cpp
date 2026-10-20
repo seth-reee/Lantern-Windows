@@ -28,6 +28,7 @@ int main(int argc,char **argv) {
    diagnosticLog(QStringLiteral("log_path=%1").arg(path));
    qInfo().noquote() << "Lantern diagnostic log:" << path;
   }
+  QObject::connect(&app,&QCoreApplication::aboutToQuit,[] { flushDiagnosticLog(); });
  }
  QQuickStyle::setStyle("Basic");
  Theme theme;

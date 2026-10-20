@@ -4,3 +4,4 @@
 
 QString startDiagnosticLog();
 void diagnosticLog(const QString &message);
+void flushDiagnosticLog();

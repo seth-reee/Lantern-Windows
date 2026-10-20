@@ -148,12 +148,13 @@ void Scanner::probe(int row) {
    connect(socket,&QTcpSocket::connected,job,[state,port,finishSocket]() { state->live=true; state->open.append(QString::number(port)); finishSocket(); });
    connect(socket,&QTcpSocket::errorOccurred,job,[finishSocket](QAbstractSocket::SocketError) { finishSocket(); });
    connect(timer,&QTimer::timeout,job,finishSocket); timer->start(m_timeout);
-   QElapsedTimer connectCall; connectCall.start();
    diagnosticLog(QStringLiteral("tcp_connect_call_begin row=%1 ip=%2 port=%3 proxy=NoProxy")
     .arg(row).arg(host.ip).arg(port));
+   QElapsedTimer connectCall; connectCall.start();
    socket->connectToHost(host.ip,port);
+   const qint64 connectCallElapsed=connectCall.elapsed();
    diagnosticLog(QStringLiteral("tcp_connect_call_return row=%1 ip=%2 port=%3 elapsed_ms=%4 state=%5")
-    .arg(row).arg(host.ip).arg(port).arg(connectCall.elapsed()).arg(int(socket->state())));
+    .arg(row).arg(host.ip).arg(port).arg(connectCallElapsed).arg(int(socket->state())));
   }
  }
 }
